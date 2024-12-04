@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import tempfile
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget, QAction, QFileDialog, QMenu
 from PyQt5.QtGui import QIcon
@@ -64,8 +65,23 @@ class MWCodeEditor(QMainWindow):
         self.unsaved_icon = QIcon('NotepadGPT/icons/handwriter.svg')
 
         self.initUI()
-            
+        
+        self.tabs.currentChanged.connect(self.on_tab_changed)
         self.load_stylesheet("NotepadGPT/styles/mainW.css")
+        
+        self.mode_actions = {
+            1: self.showFullScreen, 
+            2: self.showMaximized, 
+            3: self.showMinimized, 
+            4: self.showNormal
+        }
+        self.change_view_mode(config.view_mode_value)
+
+    def change_view_mode(self, index):
+        action = self.mode_actions.get(index)
+        if action:
+            action()
+        
 
     def tab_detached(self, index):
         """Desancla un tab y lo mueve a una nueva ventana."""
@@ -129,9 +145,15 @@ class MWCodeEditor(QMainWindow):
                 editor.setStyleSheet(tab_style)
 
     def initUI(self):
-        self.setWindowTitle('Code Editor')
-        ruta_proyecto = os.path.dirname(os.path.abspath(__file__))
+        
+        #icons_color_palletes: aea353ff, este: bd954dff
+        self.setWindowTitle('Notepad GPT')
+        #ruta_proyecto = os.path.dirname(os.path.abspath(__file__))
         # Crear acciones del menú
+        new_tab = QAction(QIcon('NotepadGPT/icons/new_file.svg'), 'New Tab', self)
+        new_tab.setShortcut('Ctrl+T')
+        new_tab.triggered.connect(self.new_tab)
+        
         open_file = QAction(QIcon('NotepadGPT/icons/open.svg'), 'Open', self)
         open_file.setShortcut('Ctrl+O')
         open_file.triggered.connect(self.open_file)
@@ -143,25 +165,46 @@ class MWCodeEditor(QMainWindow):
         save_all_files = QAction(QIcon('NotepadGPT/icons/save.svg'), 'Save all', self)
         save_all_files.setShortcut('Ctrl+Shift+S')
         save_all_files.triggered.connect(self.save_all_files)
-        
+
         run_code = QAction(QIcon('NotepadGPT/icons/run.svg'), 'Run', self)
         run_code.setShortcut('Ctrl+R')
         run_code.triggered.connect(self.run_code)
-
-        new_tab = QAction(QIcon('NotepadGPT/icons/new_file.svg'), 'New Tab', self)
-        new_tab.setShortcut('Ctrl+T')
-        new_tab.triggered.connect(self.new_tab)
         
+    ##Botones de edicion:
+        undo_action = QAction(QIcon('NotepadGPT/icons/undo_2.svg'), "Undo", self)
+        undo_action.triggered.connect(self.undo)
+        undo_action.setShortcut("Ctrl+Z")
+
+        redo_action = QAction(QIcon('NotepadGPT/icons/redo_2.svg'), "Redo", self)
+        redo_action.triggered.connect(self.redo)
+        redo_action.setShortcut("Ctrl+Y")
+
+    ## Acciones para Cut, Copy y Paste
+        cut_action = QAction(QIcon('NotepadGPT/icons/cut.svg'), "Cut", self)
+        cut_action.triggered.connect(self.cut)
+        cut_action.setShortcut("Ctrl+X")
+
+        copy_action = QAction(QIcon('NotepadGPT/icons/copy.svg'), "Copy", self)
+        copy_action.triggered.connect(self.copy)
+        copy_action.setShortcut("Ctrl+C")
+
+        paste_action = QAction(QIcon('NotepadGPT/icons/paste.svg'), "Paste", self)
+        paste_action.triggered.connect(self.paste)
+        paste_action.setShortcut("Ctrl+V")
         
 
         # Crear barra de menús
         menubar = self.menuBar()
         file_menu = menubar.addMenu('&File')
+        file_menu.addAction(new_tab)
         file_menu.addAction(open_file)
+        file_menu.addSeparator()
         file_menu.addAction(save_current_file)
         file_menu.addAction(save_all_files)
+        #file_menu.addSeparator()
+        
+        file_menu = menubar.addMenu('&Run')
         file_menu.addAction(run_code)
-        file_menu.addAction(new_tab)
         
         
         # Crear barra de herramientas con solo iconos debajo de la barra de menús
@@ -171,12 +214,19 @@ class MWCodeEditor(QMainWindow):
         toolbar.addAction(save_current_file)  # Agregar icono de guardar archivo
         toolbar.addAction(save_all_files)  # Agregar icono de guardar archivo
         toolbar.addSeparator()
-        toolbar.addAction(run_code)  # Agregar icono de ejecutar código
+        toolbar.addAction(undo_action)
+        toolbar.addAction(redo_action)
+        toolbar.addSeparator()
+        toolbar.addAction(cut_action)
+        toolbar.addAction(copy_action)
+        toolbar.addAction(paste_action)
+        toolbar.addSeparator()
+        toolbar.addAction(run_code)
         
         # Ajustar la apariencia de la barra de herramientas (iconos solamente, sin texto)
-        toolbar.setIconSize(QSize(32, 32))  # Ajustar el tamaño de los iconos
+        toolbar.setIconSize(QSize(26, 26))  # Ajustar el tamaño de los iconos
         toolbar.setFloatable(False)  # Evitar que la barra de herramientas se pueda mover
-        toolbar.setMovable(False)  # Evitar que la barra de herramientas se pueda mover
+        toolbar.setMovable(True)  # Evitar que la barra de herramientas se pueda mover
 
         self.setGeometry(300, 300, config.window_size[0], config.window_size[1])
         self.show()
@@ -257,8 +307,70 @@ class MWCodeEditor(QMainWindow):
     def run_code(self):
         """Ejecuta el código del archivo actual."""
         editor = self.tabs.currentWidget()
-        if isinstance(editor, EditorTab) and editor.get_file_path():
-            subprocess.Popen(['start', 'cmd', '/k', 'python', editor.get_file_path()], shell=True)
+        
+        # Comprobar si el editor es una instancia de EditorTab
+        if isinstance(editor, EditorTab):
+            file_path = editor.get_file_path()
+            
+            # Si no hay ruta, crear un archivo temporal
+            if not file_path:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode="w", encoding="utf-8") as temp_file:
+                    temp_file.write(editor.toPlainText())
+                    file_path = temp_file.name
+
+            # Comando para ejecutar el archivo en una nueva consola
+            if config.keep_console_open:
+                command = ['start', 'cmd', '/k', 'python', file_path]  # Mantener la consola abierta
+            else:
+                command = ['start', 'cmd', '/c', 'python', file_path]  # Cerrar la consola al finalizar
+            
+            # Ejecutar el comando
+            subprocess.Popen(command, shell=True)
+        else:
+            print("El widget actual no es una instancia de EditorTab")
+
+
+    def add_new_tab(self):
+        """Agrega una nueva pestaña con un editor."""
+        new_editor = EditorTab()
+        self.tab_widget.addTab(new_editor, "Nueva pestaña")
+
+    def get_current_editor(self):
+        """Obtiene el editor actual activo en la pestaña."""
+        current_widget = self.tabs.currentWidget()
+        if isinstance(current_widget, EditorTab):
+            return current_widget
+        return None
+
+    def undo(self):
+        """Deshace la última acción."""
+        editor = self.get_current_editor()
+        if editor:
+            editor.undo()
+
+    def redo(self):
+        """Rehace la última acción deshecha."""
+        editor = self.get_current_editor()
+        if editor:
+            editor.redo()
+
+    def cut(self):
+        """Corta el texto seleccionado."""
+        editor = self.get_current_editor()
+        if editor:
+            editor.cut()
+
+    def copy(self):
+        """Copia el texto seleccionado."""
+        editor = self.get_current_editor()
+        if editor:
+            editor.copy()
+
+    def paste(self):
+        """Pega el contenido del portapapeles."""
+        editor = self.get_current_editor()
+        if editor:
+            editor.paste()
 
     def update_title(self, index):
         """Actualiza el título de la ventana según la pestaña activa."""
@@ -295,6 +407,10 @@ class MWCodeEditor(QMainWindow):
                 # Elimina el ícono de "sin guardar"
                 self.tabs.setTabIcon(tab_index, QIcon())  # Sin ícono
 
+    def on_tab_changed(self, index):
+        editor = self.tabs.widget(index)
+        if isinstance(editor, EditorTab):
+            editor.update_font()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

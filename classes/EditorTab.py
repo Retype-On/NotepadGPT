@@ -116,7 +116,7 @@ class PythonHighlighter(QSyntaxHighlighter):
                     var_start, var_end = var_match.span()
                     var_start += 1  # Ajustar a la posición relativa
                     var_end -= 1  # Excluir las llaves
-                    self.setFormat(var_start + start-1, var_end - var_start+2, self.fstring_variable_format)
+                    self.setFormat(var_start + start -1, var_end - var_start + 2, self.fstring_variable_format)
 
         # Resaltado de comentarios
         for match in re.finditer(r"#.*", text):
@@ -153,6 +153,10 @@ class EditorTab(QPlainTextEdit):
         self.original_content = "" # Guarda el contenido original del archivo
         self.textChanged.connect(self.notify_content_change)
         
+        font = QFont("Arial", config.font_size)
+        self.line_number_area.setFont(font) 
+
+        
     def keyPressEvent(self, event):
         cursor = self.textCursor()
         
@@ -166,10 +170,15 @@ class EditorTab(QPlainTextEdit):
                 cursor.insertText(new_text)  # Insertamos el nuevo texto sin los 4 espacios
             event.accept()  # Aceptamos el evento para no hacer otro comportamiento
 
-        elif event.key() == Qt.Key_Tab:
-            indentation = "    "  # 4 espacios por nivel de indentación
-            cursor.insertText(indentation)  # Insertamos los espacios
-            event.accept()  # Aceptamos el evento para no insertar la tabulación original
+        elif event.key() == Qt.Key_Tab: # Obtener la posición del cursor en el bloque 
+            cursor_position_in_block = cursor.positionInBlock() # Obtener el texto hasta la posición del cursor 
+            current_line = cursor.block().text()[:cursor_position_in_block] # Calcular la cantidad de espacios que ya hay al inicio de la línea 
+            existing_spaces = len(current_line) - len(current_line.lstrip(' ')) # Calcular los espacios restantes necesarios para completar una tabulación de 4 espacios
+            spaces_to_add = 4 - (existing_spaces % 4)
+            if spaces_to_add < 4: 
+                cursor.insertText(' ' * spaces_to_add) 
+            else: cursor.insertText('    ')
+            event.accept()
 
         elif event.key() == Qt.Key_Return:
             # Obtenemos la línea actual hasta la posición del cursor
@@ -202,22 +211,21 @@ class EditorTab(QPlainTextEdit):
         # Devolvemos la cantidad adecuada de indentación con 4 espacios
         return " " * (spaces_count)  
 
-    def set_font(self, font_size):
+    def update_font(self):
         """Establece la fuente para todo el EditorTab."""
-        if font_size < 100 and font_size > 0:
-            self.font_size = font_size  # Actualiza el tamaño de fuente guardado
+        if config.font_size < 100 and config.font_size > 0:
             font = self.font()
-            font.setPointSize(font_size)
+            font.setPointSize(config.font_size)
+            self.setFont(font)
             self.document().setDefaultFont(font)
-            
-            if font_size < 20 and font_size > 6:
-                font2 = QFont("Arial", font_size)
-                self.line_number_area.setFont(font2)
-                self.update_line_number_area_width(0)
-                self.viewport().update()  # Actualiza la vista
-                self.line_number_area.update()  # Redibuja el área de números
+            #if font_size < 20 and font_size > 6:
+            font2 = QFont("Arial", config.font_size)
+            self.line_number_area.setFont(font2)
+            self.update_line_number_area_width(0)
+            self.viewport().update()  # Actualiza la vista
+            self.line_number_area.update()  # Redibuja el área de números
         
-            print(font_size)
+            
 
     def update_line_number_area_width(self, _):
         """Actualiza el ancho del área de números de línea."""
@@ -227,7 +235,7 @@ class EditorTab(QPlainTextEdit):
         """Calcula el ancho del área de los números de línea."""
         digits = len(str(max(1, self.blockCount())))  # Número de dígitos en el número de línea más grande
         font_metrics = self.fontMetrics()  # Métricas de la fuente actual
-        space = 6 + font_metrics.horizontalAdvance('9') * digits + (self.font_size if self.font_size <=20 else 20) # Añade un margen adicional
+        space = 6 + font_metrics.horizontalAdvance('9') * digits + (config.font_size if config.font_size <=20 else 20) # Añade un margen adicional
         return space
 
 
@@ -311,12 +319,11 @@ class EditorTab(QPlainTextEdit):
         """Maneja el zoom con Ctrl + rueda del ratón."""
         if event.modifiers() == Qt.ControlModifier:  # Verifica si Ctrl está presionado
             delta = event.angleDelta().y()
-            new_font_size = self.font_size
             if delta > 0:  # Si la rueda se mueve hacia arriba, aumentar tamaño de fuente
-                new_font_size += 2
+                config.font_size += 2
             elif delta < 0:  # Si la rueda se mueve hacia abajo, reducir tamaño de fuente
-                new_font_size -= 2
-            self.set_font(int(new_font_size))  # Aplica el nuevo tamaño de fuente
+                config.font_size -= 2
+            self.update_font()  # Aplica el nuevo tamaño de fuente
         else:
             super().wheelEvent(event)  # Delega el evento de desplazamiento normal
     
@@ -327,8 +334,7 @@ class EditorTab(QPlainTextEdit):
             self.setLineWrapMode(QPlainTextEdit.NoWrap)
         #self.setTabStopDistance(80)
         
-        self.font_size = config.font_size  # Tamaño de fuente inicial
-        self.set_font(config.font_size)  # Configura la fuente inicial
+        self.update_font()  # Configura la fuente inicial
         
     def load_content(self, content):
         """Carga el contenido inicial del archivo y lo guarda como estado original."""
