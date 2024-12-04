@@ -1,0 +1,109 @@
+QMainWindow {
+background-color: #34495e;  /* Color oscuro elegante */
+border-radius: 10px;  /* Bordes redondeados para la ventana */
+border: 2px solid #2c3e50;  /* Borde oscuro alrededor de la ventana */
+/*box-shadow: 5px 5px 10px rgba(0, 0, 0, 0.3);  /* Sombra suave */
+}
+
+/* Barra de menú */
+QMenuBar {
+background-color: #2c3e50;
+color: #ecf0f1;
+border-radius: 5px;
+}
+
+QMenuBar::item {
+padding: 5px 10px;
+}
+
+QMenuBar::item:selected {
+background-color: #16a085;  /* Color cuando se selecciona un item */
+color: #ecf0f1;
+}
+
+/* Acciones del menú */
+QMenu {
+background-color: #34495e;
+color: #ecf0f1;
+border-radius: 5px;
+}
+
+QMenu::item:selected {
+background-color: #16a085;  /* Color cuando se selecciona un item */
+color: #ecf0f1;
+}
+
+/* Barra de herramientas */
+QToolBar {
+background-color: #2c3e50;
+border-radius: 3px;
+padding: 1px;
+
+}
+
+QToolBar QToolButton {
+background-color: #34495e;
+border-radius: 3px;
+padding: 2px;  /* Reducir padding para iconos más pequeños */
+margin: 1px;
+color: #ecf0f1;
+}
+
+QToolBar QToolButton:hover {
+background-color: #16a085;  /* Color cuando el botón está en hover */
+}
+
+/* Acciones con iconos */
+QToolButton:enabled {
+color: #ecf0f1;
+}
+
+/* Editor de texto */
+QPlainTextEdit {
+background-color: #2E3440;  /* Fondo oscuro para el editor */
+color: #D8DEE9;  /* Texto claro */
+selection-background-color: #757575; /* Selección */
+selection-color: #ECEFF4;  /* Texto en selección */
+font-family: 'Courier New', monospace;
+font-size: 14pt;
+border: none;
+border-radius: 10px;
+padding: 0px;
+}
+
+QPlainTextEdit:focus {
+border: 2px solid #16a085;  /* Borde suave al enfocar */
+}
+
+
+/* Pestañas unidas al editor */
+QTabWidget::pane {
+border: none;  /* Eliminar borde de las pestañas */
+background: transparent;  /* Fondo transparente */
+margin-top: -2px;  /* Evitar espacio entre la pestaña y el editor */
+
+}
+
+QTabBar::tab {
+background-color: #34495e;
+color: #ecf0f1;
+font-size: 8pt;
+border: none;  /* Eliminar borde de la pestaña */
+border-top-left-radius: 10px;  /* Bordes redondeados solo arriba a la izquierda */
+border-top-right-radius: 10px;  /* Bordes redondeados solo arriba a la derecha */
+min-width: 100px;
+padding: 5px;
+}
+
+QTabBar::tab:selected {
+background-color: #2E3440;
+}
+
+QTabBar::tab:hover {
+background-color: #2980b9;
+}
+
+/* Ajustes de las pestañas activas */
+QTabBar::tab:!selected {
+background-color: #2c3e50;
+}
