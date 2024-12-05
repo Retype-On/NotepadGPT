@@ -9,7 +9,7 @@
 #from PyQt5.QtCore import Qt, QRegExp, QRect, QSize
 import re
 
-from PyQt5.QtWidgets import QWidget, QPlainTextEdit, QTextEdit
+from PyQt5.QtWidgets import QWidget, QPlainTextEdit, QTextEdit, QListWidget
 from PyQt5.QtGui import QSyntaxHighlighter, QColor, QFont, QTextFormat, QTextCharFormat, QPainter
 from PyQt5.QtCore import Qt, QRect, pyqtSignal
 
@@ -138,6 +138,10 @@ class EditorTab(QPlainTextEdit):
         self.updateRequest.connect(self.update_line_number_area)
         self.cursorPositionChanged.connect(self.highlight_current_line)
         
+        self.completion_popup = QListWidget()  # Popup para el autocompletador
+        self.completion_popup.setWindowFlags(Qt.ToolTip)
+        self.completion_popup.itemClicked.connect(self.insert_completion)
+        
         self.update_settings()
         self.line_number_area.update()  # Redibuja el área de números de línea
         
@@ -149,61 +153,150 @@ class EditorTab(QPlainTextEdit):
         
         font = QFont("Arial", config.font_size)
         self.line_number_area.setFont(font) 
-
         
+        self.completion_prefix = ""
+        self.keywords = [
+            "def", "class", "import", "from", "for", "while", "if", "else", 
+            "elif", "return", "yield", "try", "except", "finally", "with", 
+            "as", "pass", "break", "continue", "True", "False", "None", "lambda"
+        ]  # Lista de palabras clave para autocompletar
+  
+
+    def trigger_completion(self):
+        """Muestra el popup con las sugerencias de autocompletado."""
+        cursor = self.textCursor()
+        cursor.select(cursor.WordUnderCursor)
+        self.completion_prefix = cursor.selectedText()
+        
+        if not self.completion_prefix:
+            self.completion_popup.hide()
+            return
+
+        suggestions = [kw for kw in self.keywords if kw.startswith(self.completion_prefix)]
+        if suggestions:
+            self.show_completion_popup(suggestions)
+        else:
+            self.completion_popup.hide()
+
+    def show_completion_popup(self, suggestions):
+        """Muestra el popup con las palabras sugeridas."""
+        self.completion_popup.clear()
+        self.completion_popup.addItems(suggestions)
+        
+        cursor_rect = self.cursorRect()
+        popup_position = self.mapToGlobal(cursor_rect.bottomLeft())
+        self.completion_popup.setGeometry(popup_position.x(), popup_position.y(), 200, 100)
+        self.completion_popup.show()
+
+    def insert_completion(self, item):
+        """Inserta la palabra seleccionada en el popup."""
+        cursor = self.textCursor()
+        cursor.select(cursor.WordUnderCursor)
+        cursor.insertText(item.text())
+        self.setTextCursor(cursor)
+        self.completion_popup.hide()
+
+    def update_line_number_area_width(self, _):
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def line_number_area_width(self):
+        digits = len(str(max(1, self.blockCount())))
+        font_metrics = self.fontMetrics()
+        space = 6 + font_metrics.horizontalAdvance('9') * digits + (config.font_size if config.font_size <= 20 else 20)
+        return space
+
+    def highlight_current_line(self):
+        if not self.isReadOnly():
+            selection = QTextEdit.ExtraSelection()
+            selection.format.setBackground(QColor("#434C5E").lighter(120))
+            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            self.setExtraSelections([selection])
+
+    def notify_content_change(self):
+        self.content_changed.emit()
+
+
+
+
+  
     def keyPressEvent(self, event):
         cursor = self.textCursor()
-        
-        if event.key() == Qt.Key_Backtab:
-            cursor.movePosition(cursor.StartOfBlock)  # Nos movemos al inicio de la línea
-            current_text = cursor.block().text()
-            
-            # Si la línea tiene al menos 4 espacios al inicio, los eliminamos
-            if current_text.startswith("    "):  
-                new_text = current_text[4:]
-                cursor.insertText(new_text)  # Insertamos el nuevo texto sin los 4 espacios
+
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):  # Ocultar el popup al presionar Enter
+            self.completion_popup.hide()
+        elif event.key() == Qt.Key_Escape:  # Cerrar el popup al presionar Escape
+            self.completion_popup.hide()
+        else:
+            #super().keyPressEvent(event)
+            self.trigger_completion()
+
+        if event.key() == Qt.Key_Tab and event.modifiers() == Qt.ControlModifier:
+            self.insert_spaces_at_line_start()
+            event.accept()
+        elif event.key() == Qt.Key_Backtab: # Con Shift + Tab anadir espacios al inicio de la linea
+            cursor.select(cursor.LineUnderCursor)
+            line_text = cursor.selectedText()
+
+            if line_text.startswith(" "):
+                length = len(line_text) - len(line_text.lstrip(' '))
+                if length % config.tab_size:
+                    new_text = line_text[length % config.tab_size:]
+                else:
+                    new_text = line_text[config.tab_size:]
+                cursor.insertText(new_text)
             event.accept()  # Aceptamos el evento para no hacer otro comportamiento
 
         elif event.key() == Qt.Key_Tab: # Obtener la posición del cursor en el bloque 
-            cursor_position_in_block = cursor.positionInBlock() # Obtener el texto hasta la posición del cursor 
-            current_line = cursor.block().text()[:cursor_position_in_block] # Calcular la cantidad de espacios que ya hay al inicio de la línea 
-            existing_spaces = len(current_line) - len(current_line.lstrip(' ')) # Calcular los espacios restantes necesarios para completar una tabulación de 4 espacios
-            spaces_to_add = 4 - (existing_spaces % 4)
-            if spaces_to_add < 4: 
-                cursor.insertText(' ' * spaces_to_add) 
-            else: cursor.insertText('    ')
+            cursor.insertText(self.add_to_line_a_tab(cursor))
             event.accept()
 
         elif event.key() == Qt.Key_Return:
             # Obtenemos la línea actual hasta la posición del cursor
             current_line = cursor.block().text()  
             cursor_position_in_block = cursor.positionInBlock()
-            indent = self.getIndentationForLine(current_line, cursor)  # Obtenemos la indentación hasta el cursor
+            indent = getIndentationForLine(current_line, cursor)  # Obtenemos la indentación hasta el cursor
             #if current_line.strip().endswith(":"):
             #    indent += "    "  # Aumentamos un nivel de tabulación
             if current_line[:cursor_position_in_block].strip().endswith(":") or current_line[:cursor_position_in_block].strip().endswith("{"):
                 indent += "    "
             cursor.insertText("\n" + indent)  # Insertamos una nueva línea con la misma indentación
             event.accept()  # Aceptamos el evento
-
         else:
             super().keyPressEvent(event)  # Dejamos que el evento se maneje normalmente
+            self.trigger_completion()
+            
+    def add_to_line_a_tab(self, cursor):
+        cursor_position_in_block = cursor.positionInBlock() # Obtener el texto hasta la posición del cursor 
+        current_line = cursor.block().text()[:cursor_position_in_block] # Calcular la cantidad de espacios que ya hay al inicio de la línea 
+        existing_spaces = len(current_line) # Calcular los espacios restantes necesarios para completar una tabulación de 4 espacios
+        spaces_to_add = config.tab_size - (existing_spaces % config.tab_size)
+        return ' ' * spaces_to_add
+        
+    def insert_spaces_at_line_start(self): 
+        cursor = self.textCursor() 
+        cursor.select(cursor.LineUnderCursor) 
+        line_text = cursor.selectedText()
+        spaces = adjust_leading_spaces(line_text) # Calcular los espacios a añadir 
+        #cursor.movePosition(cursor.StartOfBlock) # Mover el cursor al inicio de la línea 
+        cursor.insertText('    '+line_text) # Insertar los espacios al inicio de la línea 
+        self.setTextCursor(cursor) # Actualizar el cursor en el editor de texto
 
-    def getIndentationForLine(self, line, cursor):
-        """
-        Esta función devuelve la cantidad de espacios al inicio de la línea hasta la posición del cursor.
-        """
-        # Obtener la posición del cursor dentro de la línea
-        cursor_position = cursor.columnNumber()
-        
-        # Solo obtener la porción de la línea que está antes del cursor
-        line_before_cursor = line[:cursor_position]
-        
-        # Contamos cuántos espacios tiene al principio la parte de la línea antes del cursor
-        spaces_count = len(line_before_cursor) - len(line_before_cursor.lstrip(' '))
-        
-        # Devolvemos la cantidad adecuada de indentación con 4 espacios
-        return " " * (spaces_count)  
+    def adjust_current_line_spaces(self): 
+        cursor = self.textCursor() 
+            # Seleccionar la línea actual 
+        cursor.select(cursor.LineUnderCursor) 
+        line_text = cursor.selectedText() 
+            # Ajustar los espacios de la línea actual 
+        adjusted_line = adjust_leading_spaces(line_text)
+    # Ajustar el texto eliminando los espacios al inicio
+        try:
+            adjusted_text = line_text[adjusted_line:]
+            # Reemplazar la línea actual con el texto ajustado 
+            cursor.insertText(adjusted_text)
+        except:
+            pass
 
     def update_font(self):
         """Establece la fuente para todo el EditorTab."""
@@ -351,3 +444,39 @@ class EditorTab(QPlainTextEdit):
         self.highlight_current_line()
         self.viewport().update()  # Actualiza el área de texto
         self.line_number_area.update()  # Actualiza el área de números de línea
+
+def count_leading_spaces(text):
+    """Cuenta cuántos espacios hay al inicio del texto."""
+    return len(text) - len(text.lstrip(' '))
+
+def adjust_leading_spaces(text):
+    """Elimina espacios al inicio del texto hasta quedar en múltiplos de 4 o, si ya son múltiplos de 4, elimina 4 espacios."""
+    leading_spaces = count_leading_spaces(text)
+    identation = config.tab_size
+    
+    if leading_spaces == 0:
+        return text  # No hay espacios para ajustar
+
+    # Calcular el número de espacios a eliminar
+    if leading_spaces % identation == 0:
+        spaces_to_update = identation
+    else:
+        spaces_to_update = leading_spaces % identation
+    
+    return spaces_to_update
+
+def getIndentationForLine(line, cursor):
+    """
+    Esta función devuelve la cantidad de espacios al inicio de la línea hasta la posición del cursor.
+    """
+    # Obtener la posición del cursor dentro de la línea
+    cursor_position = cursor.columnNumber()
+    
+    # Solo obtener la porción de la línea que está antes del cursor
+    line_before_cursor = line[:cursor_position]
+    
+    # Contamos cuántos espacios tiene al principio la parte de la línea antes del cursor
+    spaces_count = len(line_before_cursor) - len(line_before_cursor.lstrip(' '))
+    
+    # Devolvemos la cantidad adecuada de indentación con 4 espacios
+    return " " * (spaces_count) 
