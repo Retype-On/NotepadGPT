@@ -9,6 +9,7 @@ from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from classes.EditorTab import EditorTab
 
 from config.Config import config
+from extras.utils import FindReplaceDialog, RAction
 
 class DetachedTabWindow(QMainWindow):
     tab_reattached = pyqtSignal(EditorTab)  # Señal para devolver la pestaña al editor principal
@@ -17,36 +18,156 @@ class DetachedTabWindow(QMainWindow):
         super().__init__(parent)
         self.editor = EditorTab()
         self.editor_tab = editor_tab  # Mantener referencia del EditorTab
-        self.setWindowTitle(title)
+        self.setWindowTitle(editor_tab.file_path if editor_tab.file_path else "Untiled")
         self.setCentralWidget(self.editor)
         self.resize(800, 600)
         
         #Establecer los valores necesarios:
         self.editor.setPlainText(editor_tab.toPlainText())
-        
-        # Aplicar el estilo actual del editor principal, si está definido
-        if hasattr(parent, 'editor_style'):
-            editor_tab.setStyleSheet(parent.editor_style)
+        self.editor.set_file_path(editor_tab.get_file_path())
+        self.editor.original_content = editor_tab.original_content
 
         # Barra de herramientas con botón para regresar el tab
         toolbar = self.addToolBar('Detached Toolbar')
         toolbar.setMovable(False)
-        reattach_action = QAction(QIcon('NotepadGPT/icons/reattach.svg'), 'Volver a la ventana principal', self)
-        reattach_action.triggered.connect(self.reattach_tab)
-        toolbar.addAction(reattach_action)
         
+        self.initUI()
         self.show()
+
+    def initUI(self):
+        #icons_color_palletes: aea353ff, este: bd954dff
+        #self.setWindowTitle('Notepad GPT')
+        #ruta_proyecto = os.path.dirname(os.path.abspath(__file__))
+        # Crear acciones del menú
+        reattach_action = RAction(self,'reattach.svg', 'Volver a la ventana principal', 'Alt+F4', self.reattach_tab)
+        save_current_file = RAction(self, 'save.svg', 'Save file', 'Ctrl+S', self.save_current_file)
+        save_current_file_as = RAction(self, 'save.svg', 'Save file as...', 'Ctrl+Alt+S', self.save_current_file_as)
+        undo_action = RAction(self, 'undo_2.svg', 'Undo last action', 'Ctrl+Z', self.undo)
+        redo_action = RAction(self, 'redo_2.svg', 'Redo last action', 'Ctrl+Y', self.redo)
+        cut_action = RAction(self, 'cut.svg', 'Cut selected text or selected line', 'Ctrl+X', self.cut)
+        copy_action = RAction(self, 'copy.svg', 'Copy selected text or selected line', 'Ctrl+C', self.copy)
+        paste_action = RAction(self, 'paste.svg', 'Paste of clipboard', 'Ctrl+V', self.paste)
+        run_code = RAction(self, 'run.svg', 'Run in console', 'Ctrl+R', self.run_code)
+        
+        # Crear barra de menús
+        #file_menu.addSeparator()
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu('&File')
+        file_menu.addAction(reattach_action)
+        file_menu.addSeparator()
+        file_menu.addAction(save_current_file)
+        file_menu.addAction(save_current_file_as)
+        
+        file_menu = menubar.addMenu('&Edit')
+        file_menu.addAction(undo_action)
+        file_menu.addAction(redo_action)
+        file_menu.addSeparator()
+        file_menu.addAction(cut_action)
+        file_menu.addAction(copy_action)
+        file_menu.addAction(paste_action)
+        file_menu = menubar.addMenu('&Run')
+        file_menu.addAction(run_code)
+        
+        # Crear barra de herramientas con solo iconos debajo de la barra de menús
+        toolbar = self.addToolBar('Toolbar')
+        toolbar.addAction(reattach_action)
+        toolbar.addSeparator()
+        toolbar.addAction(save_current_file)
+        toolbar.addAction(save_current_file_as)
+        toolbar.addSeparator()
+        toolbar.addAction(undo_action)
+        toolbar.addAction(redo_action)
+        toolbar.addSeparator()
+        toolbar.addAction(cut_action)
+        toolbar.addAction(copy_action)
+        toolbar.addAction(paste_action)
+        toolbar.addSeparator()
+        toolbar.addAction(run_code)
+        
+        # Ajustar la apariencia de la barra de herramientas (iconos solamente, sin texto)
+        toolbar.setIconSize(QSize(32, 32))  # Ajustar el tamaño de los iconos
+        toolbar.setFloatable(False)  # Evitar que la barra de herramientas se pueda liberar
+        toolbar.setMovable(True)  # Evitar que la barra de herramientas se pueda mover
 
     def reattach_tab(self):
         """Devuelve la pestaña a la ventana principal."""
         self.editor_tab.setPlainText(self.editor.toPlainText())
-        #self.editor_tab.#
+        self.editor_tab.set_file_path(self.editor.get_file_path())
+        self.editor_tab.original_content = self.editor.original_content
         self.tab_reattached.emit(self.editor_tab)  # Emitir señal para devolver el tab
         self.close()
     
     def closeEvent(self, event):
         self.reattach_tab()
         event.accept()
+    
+    def save_current_file(self):
+        if isinstance(self.editor, EditorTab) and self.editor.file_path:
+            with open(self.editor.get_file_path(), 'w') as f:
+                f.write(self.editor.toPlainText())
+            self.editor.mark_as_saved()
+            #self.update_this_tab_icon(editor)              Aqui se arreglaria el simbolo de guardado...
+        else:
+            self.save_current_file_as()
+    
+    def save_current_file_as(self):
+        """Guarda el archivo enviado con una nueva ruta."""
+        if isinstance(self.editor, EditorTab):
+            fname, _ = QFileDialog.getSaveFileName(self, 'Save file', '', "Python Files (*.py);;All Files (*)")
+            if fname:
+                self.editor.set_file_path(fname)
+                with open(fname, 'w') as f:
+                    f.write(self.editor.toPlainText())
+                self.setWindowTitle(fname)
+                self.editor.mark_as_saved()
+                #self.update_this_tab_icon(self.editor)      Aqui se arreglaria el simbolo de guardado...
+
+    def run_code(self):
+        """Ejecuta el código del archivo actual."""        
+        # Comprobar si el editor es una instancia de EditorTab
+        if isinstance(self.editor, EditorTab):
+            file_path = self.editor.get_file_path()
+            # Si no hay ruta, crear un archivo temporal
+            if not file_path:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode="w", encoding=config.encoding_files) as temp_file:
+                    temp_file.write(self.editor.toPlainText())
+                    file_path = temp_file.name
+
+            # Comando para ejecutar el archivo en una nueva consola
+            if config.keep_console_open:
+                command = ['start', 'cmd', '/k', 'python', file_path]  # Mantener la consola abierta
+            else:
+                command = ['start', 'cmd', '/c', 'python', file_path]  # Cerrar la consola al finalizar
+            
+            # Ejecutar el comando
+            subprocess.Popen(command, shell=True)
+        else:
+            print("El widget actual no es una instancia de EditorTab")
+
+    def undo(self):
+        """Deshace la última acción."""
+        if self.editor:
+            self.editor.undo()
+
+    def redo(self):
+        """Rehace la última acción deshecha."""
+        if self.editor:
+            self.editor.redo()
+
+    def cut(self):
+        """Corta el texto seleccionado."""
+        if self.editor:
+            self.editor.cut()
+
+    def copy(self):
+        """Copia el texto seleccionado."""
+        if self.editor:
+            self.editor.copy()
+
+    def paste(self):
+        """Pega el contenido del portapapeles."""
+        if self.editor:
+            self.editor.paste()
 
 class MWCodeEditor(QMainWindow):
     #   Editor principal
@@ -61,6 +182,8 @@ class MWCodeEditor(QMainWindow):
         
         self.tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
         self.tabs.tabBar().customContextMenuRequested.connect(self.context_menu_requested)
+        
+        self.find_dialog = FindReplaceDialog(self)
         
         self.unsaved_icon = QIcon('NotepadGPT/icons/handwriter.svg')
 
@@ -130,7 +253,7 @@ class MWCodeEditor(QMainWindow):
     def load_stylesheet(self, path):
         """Carga un archivo CSS y aplica el estilo a la ventana."""
         try:
-            with open(path, "r", encoding="utf-8") as file:
+            with open(path, "r", encoding=config.encoding_files) as file:
                 css = file.read()
                 self.setStyleSheet(css)
         except FileNotFoundError:
@@ -150,69 +273,50 @@ class MWCodeEditor(QMainWindow):
         self.setWindowTitle('Notepad GPT')
         #ruta_proyecto = os.path.dirname(os.path.abspath(__file__))
         # Crear acciones del menú
-        new_tab = QAction(QIcon('NotepadGPT/icons/new_file.svg'), 'New Tab', self)
-        new_tab.setShortcut('Ctrl+T')
-        new_tab.triggered.connect(self.new_tab)
+        new_tab = RAction(self, 'new_file.svg', 'New Tab', 'Ctrl+T', self.new_tab)
+        open_file = RAction(self, 'open.svg', 'Open', 'Ctrl+O', self.open_file)
+        save_current_file = RAction(self, 'save.svg', 'Save file', 'Ctrl+S', self.save_current_file)
+        save_current_file_as=RAction(self, 'save.svg', 'Save file as...', 'Ctrl+Alt+S', self.save_current_file_as)
+        save_all_files = RAction(self, 'save.svg', 'Save all files', 'Ctrl+Shift+S', self.save_all_files)
+        run_code = RAction(self, 'run.svg', 'Run in console', 'Ctrl+R', self.run_code)
+        undo_action = RAction(self, 'undo_2.svg', 'Undo last action', 'Ctrl+Z', self.undo)
+        redo_action = RAction(self, 'redo_2.svg', 'Redo last action', 'Ctrl+Y', self.redo)
+        cut_action = RAction(self, 'cut.svg', 'Cut selected text or selected line', 'Ctrl+X', self.cut)
+        copy_action = RAction(self, 'copy.svg', 'Copy selected text or selected line', 'Ctrl+C', self.copy)
+        paste_action = RAction(self, 'paste.svg', 'Paste of clipboard', 'Ctrl+V', self.paste)
+        find_dialog = RAction(self, 'document-magnifying-glass.svg', 'Search or Replace', 'Ctrl+F', self.open_find_dialog)
         
-        open_file = QAction(QIcon('NotepadGPT/icons/open.svg'), 'Open', self)
-        open_file.setShortcut('Ctrl+O')
-        open_file.triggered.connect(self.open_file)
-
-        save_current_file = QAction(QIcon('NotepadGPT/icons/save.svg'), 'Save', self)
-        save_current_file.setShortcut('Ctrl+S')
-        save_current_file.triggered.connect(self.save_current_file)
-        
-        save_all_files = QAction(QIcon('NotepadGPT/icons/save.svg'), 'Save all', self)
-        save_all_files.setShortcut('Ctrl+Shift+S')
-        save_all_files.triggered.connect(self.save_all_files)
-
-        run_code = QAction(QIcon('NotepadGPT/icons/run.svg'), 'Run', self)
-        run_code.setShortcut('Ctrl+R')
-        run_code.triggered.connect(self.run_code)
-        
-    ##Botones de edicion:
-        undo_action = QAction(QIcon('NotepadGPT/icons/undo_2.svg'), "Undo", self)
-        undo_action.triggered.connect(self.undo)
-        undo_action.setShortcut("Ctrl+Z")
-
-        redo_action = QAction(QIcon('NotepadGPT/icons/redo_2.svg'), "Redo", self)
-        redo_action.triggered.connect(self.redo)
-        redo_action.setShortcut("Ctrl+Y")
-
-    ## Acciones para Cut, Copy y Paste
-        cut_action = QAction(QIcon('NotepadGPT/icons/cut.svg'), "Cut", self)
-        cut_action.triggered.connect(self.cut)
-        cut_action.setShortcut("Ctrl+X")
-
-        copy_action = QAction(QIcon('NotepadGPT/icons/copy.svg'), "Copy", self)
-        copy_action.triggered.connect(self.copy)
-        copy_action.setShortcut("Ctrl+C")
-
-        paste_action = QAction(QIcon('NotepadGPT/icons/paste.svg'), "Paste", self)
-        paste_action.triggered.connect(self.paste)
-        paste_action.setShortcut("Ctrl+V")
-        
-
         # Crear barra de menús
+        #file_menu.addSeparator()
         menubar = self.menuBar()
         file_menu = menubar.addMenu('&File')
         file_menu.addAction(new_tab)
         file_menu.addAction(open_file)
         file_menu.addSeparator()
         file_menu.addAction(save_current_file)
+        file_menu.addAction(save_current_file_as)
         file_menu.addAction(save_all_files)
-        #file_menu.addSeparator()
+        
+        file_menu = menubar.addMenu('&Edit')
+        file_menu.addAction(undo_action)
+        file_menu.addAction(redo_action)
+        file_menu.addSeparator()
+        file_menu.addAction(cut_action)
+        file_menu.addAction(copy_action)
+        file_menu.addAction(paste_action)
         
         file_menu = menubar.addMenu('&Run')
+        file_menu.addAction(find_dialog)
         file_menu.addAction(run_code)
         
         
         # Crear barra de herramientas con solo iconos debajo de la barra de menús
         toolbar = self.addToolBar('Toolbar')
-        toolbar.addAction(new_tab)  # Agregar icono de nueva pestaña
-        toolbar.addAction(open_file)  # Agregar icono de abrir archivo
-        toolbar.addAction(save_current_file)  # Agregar icono de guardar archivo
-        toolbar.addAction(save_all_files)  # Agregar icono de guardar archivo
+        toolbar.addAction(new_tab)
+        toolbar.addAction(open_file)
+        toolbar.addAction(save_current_file)
+        toolbar.addAction(save_current_file_as)
+        toolbar.addAction(save_all_files)
         toolbar.addSeparator()
         toolbar.addAction(undo_action)
         toolbar.addAction(redo_action)
@@ -221,11 +325,12 @@ class MWCodeEditor(QMainWindow):
         toolbar.addAction(copy_action)
         toolbar.addAction(paste_action)
         toolbar.addSeparator()
+        toolbar.addAction(find_dialog)
         toolbar.addAction(run_code)
         
         # Ajustar la apariencia de la barra de herramientas (iconos solamente, sin texto)
-        toolbar.setIconSize(QSize(26, 26))  # Ajustar el tamaño de los iconos
-        toolbar.setFloatable(False)  # Evitar que la barra de herramientas se pueda mover
+        toolbar.setIconSize(QSize(32, 32))  # Ajustar el tamaño de los iconos
+        toolbar.setFloatable(False)  # Evitar que la barra de herramientas se pueda liberar
         toolbar.setMovable(True)  # Evitar que la barra de herramientas se pueda mover
 
         self.setGeometry(300, 300, config.window_size[0], config.window_size[1])
@@ -268,7 +373,7 @@ class MWCodeEditor(QMainWindow):
     def save_all_files(self):
         """Guarda el archivo actual."""
         for i in range(self.tabs.count()):
-            editor = self.tabs.widget(i)
+            editor = self.parent.tabs.widget(i)
             self.save_file(editor, i)
     
     def save_current_file(self):
@@ -314,7 +419,7 @@ class MWCodeEditor(QMainWindow):
             
             # Si no hay ruta, crear un archivo temporal
             if not file_path:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode="w", encoding="utf-8") as temp_file:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode="w", encoding=config.encoding_files) as temp_file:
                     temp_file.write(editor.toPlainText())
                     file_path = temp_file.name
 
@@ -328,12 +433,6 @@ class MWCodeEditor(QMainWindow):
             subprocess.Popen(command, shell=True)
         else:
             print("El widget actual no es una instancia de EditorTab")
-
-
-    def add_new_tab(self):
-        """Agrega una nueva pestaña con un editor."""
-        new_editor = EditorTab()
-        self.tab_widget.addTab(new_editor, "Nueva pestaña")
 
     def get_current_editor(self):
         """Obtiene el editor actual activo en la pestaña."""
@@ -412,8 +511,17 @@ class MWCodeEditor(QMainWindow):
         if isinstance(editor, EditorTab):
             editor.update_font()
 
+    def open_find_dialog(self):
+        """Abre el cuadro de diálogo de buscar y reemplazar."""
+        editor = self.get_current_editor()
+        if editor:
+            self.find_dialog.set_editor(editor)
+            self.find_dialog.show()
+        else:
+            QMessageBox.warning(self, "Error", "No hay ningún editor activo.")
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     ex = MWCodeEditor()
-    ex.new_tab()
+    ex.new_tab("Welcome!")
     sys.exit(app.exec_())

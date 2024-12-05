@@ -141,12 +141,6 @@ class EditorTab(QPlainTextEdit):
         self.update_settings()
         self.line_number_area.update()  # Redibuja el área de números de línea
         
-        font = QFont("Arial", 12)
-        self.line_number_area.setFont(font)
-        self.update_line_number_area_width(0)
-        self.viewport().update()  # Actualiza la vista
-        self.line_number_area.update()  # Redibuja el área de números
-        
         self.update_line_number_area_width(0)
         self.highlight_current_line()
         
@@ -257,9 +251,7 @@ class EditorTab(QPlainTextEdit):
         self.viewport().update()
         #print(f"Viewport: {self.viewport().geometry()}")
         #print(f"Line Number Area: {self.line_number_area.geometry()}")
-
-
-
+    
     def line_number_area_paint_event(self, event):
         """Dibuja los números de línea alineados hacia la parte superior y sin cortarse."""
         painter = QPainter(self.line_number_area)
@@ -319,9 +311,9 @@ class EditorTab(QPlainTextEdit):
         """Maneja el zoom con Ctrl + rueda del ratón."""
         if event.modifiers() == Qt.ControlModifier:  # Verifica si Ctrl está presionado
             delta = event.angleDelta().y()
-            if delta > 0:  # Si la rueda se mueve hacia arriba, aumentar tamaño de fuente
+            if delta > 0 and config.font_size < 100:  # Si la rueda se mueve hacia arriba, aumentar tamaño de fuente
                 config.font_size += 2
-            elif delta < 0:  # Si la rueda se mueve hacia abajo, reducir tamaño de fuente
+            elif delta < 0 and config.font_size >= 0:  # Si la rueda se mueve hacia abajo, reducir tamaño de fuente
                 config.font_size -= 2
             self.update_font()  # Aplica el nuevo tamaño de fuente
         else:
@@ -334,7 +326,7 @@ class EditorTab(QPlainTextEdit):
             self.setLineWrapMode(QPlainTextEdit.NoWrap)
         #self.setTabStopDistance(80)
         
-        self.update_font()  # Configura la fuente inicial
+        self.update_font()
         
     def load_content(self, content):
         """Carga el contenido inicial del archivo y lo guarda como estado original."""
