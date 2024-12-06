@@ -8,9 +8,12 @@
 #from PyQt5.QtGui import QIcon, QColor, QSyntaxHighlighter, QTextCharFormat, QFont, QTextFormat, QPainter, QPen, QKeyEvent
 #from PyQt5.QtCore import Qt, QRegExp, QRect, QSize
 import re
+import ast
+import importlib
+import inspect
 
-from PyQt5.QtWidgets import QWidget, QPlainTextEdit, QTextEdit, QListWidget
-from PyQt5.QtGui import QSyntaxHighlighter, QColor, QFont, QTextFormat, QTextCharFormat, QPainter
+from PyQt5.QtWidgets import QWidget, QPlainTextEdit, QTextEdit, QListWidget, QListWidgetItem
+from PyQt5.QtGui import QSyntaxHighlighter, QColor, QFont, QTextFormat, QTextCharFormat, QPainter, QTextCursor
 from PyQt5.QtCore import Qt, QRect, pyqtSignal
 
 from config.Config import config
@@ -155,67 +158,158 @@ class EditorTab(QPlainTextEdit):
         self.line_number_area.setFont(font) 
         
         self.completion_prefix = ""
+        self.imported_modules = {}
+        self.user_defined_elements = []
         self.keywords = [
             "def", "class", "import", "from", "for", "while", "if", "else", 
             "elif", "return", "yield", "try", "except", "finally", "with", 
-            "as", "pass", "break", "continue", "True", "False", "None", "lambda"
+            "as", "pass", "break", "continue", "True", "False", "None", "lambda", "self"
         ]  # Lista de palabras clave para autocompletar
   
 
     def trigger_completion(self):
-        """Muestra el popup con las sugerencias de autocompletado."""
         cursor = self.textCursor()
-        cursor.select(cursor.WordUnderCursor)
+        cursor.select(QTextCursor.WordUnderCursor)
         self.completion_prefix = cursor.selectedText()
-        
+
         if not self.completion_prefix:
             self.completion_popup.hide()
             return
 
-        suggestions = [kw for kw in self.keywords if kw.startswith(self.completion_prefix)]
+        suggestions = self.get_suggestions()
         if suggestions:
             self.show_completion_popup(suggestions)
         else:
             self.completion_popup.hide()
 
+    def get_suggestions(self):
+        """Genera sugerencias basadas en contexto actual."""
+        text_before_cursor = self.text_before_cursor()
+        if "." in text_before_cursor:
+            return self.get_attribute_suggestions(text_before_cursor)
+        elif "(" in text_before_cursor:
+            return self.get_function_arguments(text_before_cursor)
+        else:
+            return self.get_general_suggestions()
+
+    def text_before_cursor(self):
+        """Obtiene el texto antes del cursor."""
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
+        return cursor.selectedText()
+
+    def get_general_suggestions(self):
+        """Sugerencias generales: palabras clave, definiciones locales y bibliotecas."""
+        keyword_suggestions = [kw for kw in ["def", "class", "import", "from", "if", "else", "return"] if kw.startswith(self.completion_prefix)]
+        user_defined_suggestions = self.get_user_defined_elements()
+        library_suggestions = self.get_library_suggestions()
+        return sorted(set(keyword_suggestions + user_defined_suggestions + library_suggestions))
+
+    def get_user_defined_elements(self):
+        """Obtiene elementos definidos por el usuario en el contexto actual."""
+        try:
+            tree = ast.parse(self.toPlainText())
+            elements = []
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    elements.append(node.name)
+                elif isinstance(node, ast.ClassDef):
+                    elements.append(node.name)
+                elif isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            elements.append(target.id)
+
+            return [e for e in elements if e.startswith(self.completion_prefix)]
+        except Exception as e:
+            print(f"Error al obtener elementos definidos por el usuario: {e}")
+            return []
+
+    def get_library_suggestions(self):
+        """Obtiene sugerencias de bibliotecas importadas."""
+        try:
+            tree = ast.parse(self.toPlainText())
+            imported = []
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imported.append(alias.name)
+                elif isinstance(node, ast.ImportFrom):
+                    imported.append(node.module)
+
+            suggestions = []
+            for module_name in imported:
+                if module_name not in self.imported_modules:
+                    try:
+                        self.imported_modules[module_name] = importlib.import_module(module_name)
+                    except ImportError:
+                        continue
+
+                module = self.imported_modules[module_name]
+                suggestions.extend(dir(module))
+
+            return [s for s in suggestions if s.startswith(self.completion_prefix)]
+        except Exception as e:
+            print(f"Error al obtener sugerencias de bibliotecas: {e}")
+            return []
+
+    def get_attribute_suggestions(self, text):
+        """Obtiene sugerencias de atributos/métodos de un objeto."""
+        try:
+            obj_name = text.split(".")[-2]
+            tree = ast.parse(self.toPlainText())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == obj_name:
+                            obj = eval(node.value)
+                            return dir(obj)
+            return []
+        except Exception as e:
+            print(f"Error al obtener atributos: {e}")
+            return []
+
+    def get_function_arguments(self, text):
+        """Obtiene los argumentos de una función."""
+        func_name = text.split("(")[-2].strip()
+        try:
+            tree = ast.parse(self.toPlainText())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                    return [arg.arg for arg in node.args.args]
+            if func_name in self.imported_modules:
+                func = eval(func_name)
+                if callable(func):
+                    return list(inspect.signature(func).parameters.keys())
+            return []
+        except Exception as e:
+            print(f"Error al obtener argumentos: {e}")
+            return []
+
     def show_completion_popup(self, suggestions):
-        """Muestra el popup con las palabras sugeridas."""
+        """Muestra el popup de sugerencias."""
         self.completion_popup.clear()
-        self.completion_popup.addItems(suggestions)
-        
+        for suggestion in suggestions:
+            item = QListWidgetItem(suggestion)
+            self.completion_popup.addItem(item)
+
+        popup_width = max(self.fontMetrics().horizontalAdvance(s) for s in suggestions) + 20
+        popup_height = min(len(suggestions) * self.fontMetrics().height(), 300)
         cursor_rect = self.cursorRect()
         popup_position = self.mapToGlobal(cursor_rect.bottomLeft())
-        self.completion_popup.setGeometry(popup_position.x(), popup_position.y(), 200, 100)
+        self.completion_popup.setGeometry(popup_position.x(), popup_position.y(), popup_width, popup_height)
+        self.completion_popup.setCurrentRow(0)
         self.completion_popup.show()
 
     def insert_completion(self, item):
-        """Inserta la palabra seleccionada en el popup."""
+        """Inserta la sugerencia seleccionada."""
         cursor = self.textCursor()
-        cursor.select(cursor.WordUnderCursor)
+        cursor.select(QTextCursor.WordUnderCursor)
         cursor.insertText(item.text())
         self.setTextCursor(cursor)
         self.completion_popup.hide()
-
-    def update_line_number_area_width(self, _):
-        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
-
-    def line_number_area_width(self):
-        digits = len(str(max(1, self.blockCount())))
-        font_metrics = self.fontMetrics()
-        space = 6 + font_metrics.horizontalAdvance('9') * digits + (config.font_size if config.font_size <= 20 else 20)
-        return space
-
-    def highlight_current_line(self):
-        if not self.isReadOnly():
-            selection = QTextEdit.ExtraSelection()
-            selection.format.setBackground(QColor("#434C5E").lighter(120))
-            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
-            selection.cursor = self.textCursor()
-            selection.cursor.clearSelection()
-            self.setExtraSelections([selection])
-
-    def notify_content_change(self):
-        self.content_changed.emit()
 
 
 
@@ -224,13 +318,31 @@ class EditorTab(QPlainTextEdit):
     def keyPressEvent(self, event):
         cursor = self.textCursor()
 
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):  # Ocultar el popup al presionar Enter
-            self.completion_popup.hide()
-        elif event.key() == Qt.Key_Escape:  # Cerrar el popup al presionar Escape
-            self.completion_popup.hide()
-        else:
-            #super().keyPressEvent(event)
-            self.trigger_completion()
+        if self.completion_popup.isVisible():
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):  # Seleccionar opción del popup
+                current_item = self.completion_popup.currentItem()
+                if current_item:
+                    self.insert_completion(current_item)
+                    event.accept()
+                    return
+            elif event.key() == Qt.Key_Down:  # Navegar hacia abajo en el popup
+                current_row = self.completion_popup.currentRow()
+                self.completion_popup.setCurrentRow(current_row + 1)
+                event.accept()
+                return
+            elif event.key() == Qt.Key_Up:  # Navegar hacia arriba en el popup
+                current_row = self.completion_popup.currentRow()
+                self.completion_popup.setCurrentRow(current_row - 1)
+                event.accept()
+                return
+            elif event.key() == Qt.Key_Escape:  # Cerrar el popup
+                self.completion_popup.hide()
+                event.accept()
+                return
+        elif event.key() in (Qt.Key_Space, Qt.Key_Tab):  # Ocultar popup si se utiliza espacio/tab fuera del popup
+            #self.completion_popup.hide()
+            pass
+            
 
         if event.key() == Qt.Key_Tab and event.modifiers() == Qt.ControlModifier:
             self.insert_spaces_at_line_start()
